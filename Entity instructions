@@ -1,0 +1,266 @@
+Excellent — below is your **comprehensive, production-grade Copilot Agent Mode prompt**.
+It’s written to ensure **GitHub Copilot (in agent mode)** fully understands your **Astra Job Scheduler** architecture, the entity relationships, and how to auto-generate or enhance your Spring Boot 17 project with the correct models, repositories, services, and scheduler logic.
+
+This version includes **every column** for each entity (`astra_job_workflows`, `astra_scheduled_jobs_config`, `astra_run_schedule_list`, `astra_triggered_jobs`, `astra_triggered_jobs_logs`) — carefully chosen for functional completeness, performance, and clarity.
+
+---
+
+## 🧠 **Copilot Agent Master Prompt: Astra Scheduler System (Spring Boot + JPA)**
+
+> **Objective:**
+> Generate, validate, and integrate all necessary classes, relationships, and logic for a **Job Scheduling and Execution Framework** called **Astra Scheduler** in a **Spring Boot 3 / Java 17** project.
+>
+> The system supports both **scheduled** and **manual job executions**, and logs detailed information for each run.
+
+---
+
+### ⚙️ **Architecture Overview**
+
+The system coordinates recurring and ad-hoc job executions through a chain of entities and services:
+
+1. **`astra_job_workflows`** – defines jobs and workflows.
+2. **`astra_scheduled_jobs_config`** – defines recurring schedules.
+3. **`astra_run_schedule_list`** – queues all jobs before execution.
+4. **`astra_triggered_jobs`** – represents actual job executions.
+5. **`astra_triggered_jobs_logs`** – stores detailed runtime logs for each execution.
+6. **`AstraBatchExecScheduler`** – orchestrates and executes jobs at runtime.
+
+---
+
+## 🧩 ENTITY DEFINITIONS (Full Columns + Relationships)
+
+### 1️⃣ **AstraJobWorkflows**
+
+Defines the core workflow/job that can be scheduled or manually triggered.
+
+| Column                   | Type           | Description                            |
+| ------------------------ | -------------- | -------------------------------------- |
+| **workflow_id**          | `BIGINT (PK)`  | Unique workflow ID                     |
+| **workflow_name**        | `VARCHAR(255)` | Human-readable name                    |
+| **workflow_type**        | `VARCHAR(100)` | e.g., “ETL”, “Automation”, “Analytics” |
+| **workflow_description** | `TEXT`         | Purpose or summary                     |
+| **created_by**           | `VARCHAR(100)` | Owner or author                        |
+| **created_at**           | `TIMESTAMP`    | Creation time                          |
+| **updated_at**           | `TIMESTAMP`    | Last update time                       |
+| **environment**          | `VARCHAR(50)`  | e.g., DEV / QA / PROD                  |
+| **platform**             | `VARCHAR(100)` | System or platform executed on         |
+| **version**              | `VARCHAR(50)`  | Workflow version identifier            |
+| **is_active**            | `BOOLEAN`      | Whether the workflow is active         |
+
+**Relationships**
+
+* `@OneToMany(mappedBy="workflow")` → `AstraScheduledJobsConfig`
+* `@OneToMany(mappedBy="workflow")` → `AstraTriggeredJobs`
+* `@OneToMany(mappedBy="workflow")` → `AstraTriggeredJobsLogs`
+
+---
+
+### 2️⃣ **AstraScheduledJobsConfig**
+
+Defines recurrence rules for when a workflow should run.
+
+| Column                  | Type                                            | Description                                |
+| ----------------------- | ----------------------------------------------- | ------------------------------------------ |
+| **schedule_id**         | `BIGINT (PK)`                                   | Unique schedule ID                         |
+| **workflow_id**         | `BIGINT (FK → astra_job_workflows.workflow_id)` | Links to workflow                          |
+| **frequency_type**      | `VARCHAR(50)`                                   | e.g., DAILY, WEEKLY, MONTHLY               |
+| **frequency_value**     | `INT`                                           | Numeric frequency value                    |
+| **trigger_days**        | `VARCHAR(100)`                                  | Comma-separated days (MON,TUE,...)         |
+| **schedule_start_time** | `TIME`                                          | Start time of run window                   |
+| **schedule_end_time**   | `TIME`                                          | End time (if applicable)                   |
+| **from_date**           | `DATE`                                          | Valid-from date                            |
+| **to_date**             | `DATE`                                          | Valid-to date                              |
+| **time_zone**           | `VARCHAR(50)`                                   | Time zone for scheduling                   |
+| **is_enabled**          | `BOOLEAN`                                       | If false, skip scheduling                  |
+| **last_generated_at**   | `TIMESTAMP`                                     | Last time jobs were added to schedule list |
+| **next_run_preview**    | `TIMESTAMP`                                     | Next calculated run (preview only)         |
+| **created_at**          | `TIMESTAMP`                                     | Record creation                            |
+| **updated_at**          | `TIMESTAMP`                                     | Record last update                         |
+
+**Relationships**
+
+* `@ManyToOne` → `AstraJobWorkflows`
+* `@OneToMany(mappedBy="scheduledJob")` → `AstraRunScheduleList`
+
+---
+
+### 3️⃣ **AstraRunScheduleList**
+
+Acts as the central **queue** of jobs waiting to be executed.
+
+| Column                 | Type                                                    | Description                                     |
+| ---------------------- | ------------------------------------------------------- | ----------------------------------------------- |
+| **schedule_list_id**   | `BIGINT (PK)`                                           | Unique ID                                       |
+| **scheduled_job_id**   | `BIGINT (FK → astra_scheduled_jobs_config.schedule_id)` | Linked config                                   |
+| **workflow_id**        | `BIGINT (FK → astra_job_workflows.workflow_id)`         | Linked workflow                                 |
+| **trigger_job_id**     | `BIGINT (FK → astra_triggered_jobs.trigger_job_id)`     | Filled once triggered                           |
+| **scheduled_run_time** | `TIMESTAMP`                                             | When the job is planned to execute              |
+| **triggered_at**       | `TIMESTAMP`                                             | Actual trigger time                             |
+| **status**             | `VARCHAR(50)`                                           | e.g., PENDING, QUEUED, RUNNING, SUCCESS, FAILED |
+| **priority**           | `INT`                                                   | Priority of job execution                       |
+| **retry_count**        | `INT`                                                   | Retry attempts for this scheduled run           |
+| **created_at**         | `TIMESTAMP`                                             | Record created                                  |
+| **updated_at**         | `TIMESTAMP`                                             | Record updated                                  |
+| **notes**              | `TEXT`                                                  | Optional message or admin comment               |
+
+**Relationships**
+
+* `@ManyToOne` → `AstraScheduledJobsConfig`
+* `@ManyToOne` → `AstraJobWorkflows`
+* `@OneToOne(mappedBy="runSchedule")` → `AstraTriggeredJobs`
+
+---
+
+### 4️⃣ **AstraTriggeredJobs**
+
+Represents **each executed job instance**, whether scheduled or manual.
+
+| Column              | Type                                                     | Description                    |
+| ------------------- | -------------------------------------------------------- | ------------------------------ |
+| **trigger_job_id**  | `BIGINT (PK)`                                            | Unique ID                      |
+| **workflow_id**     | `BIGINT (FK → astra_job_workflows.workflow_id)`          | Workflow reference             |
+| **trigger_log_id**  | `BIGINT (FK → astra_triggered_jobs_logs.trigger_log_id)` | Optional linkage to latest log |
+| **run_schedule_id** | `BIGINT (FK → astra_run_schedule_list.schedule_list_id)` | The originating queue record   |
+| **trigger_source**  | `VARCHAR(50)`                                            | SCHEDULED, MANUAL, RETRY       |
+| **triggered_time**  | `TIMESTAMP`                                              | Job start time                 |
+| **completed_time**  | `TIMESTAMP`                                              | Job end time                   |
+| **duration_ms**     | `BIGINT`                                                 | Runtime in milliseconds        |
+| **status**          | `VARCHAR(50)`                                            | RUNNING, SUCCESS, FAILED       |
+| **exit_code**       | `INT`                                                    | System exit code               |
+| **initiated_by**    | `VARCHAR(100)`                                           | User or system trigger         |
+| **parameters_json** | `TEXT`                                                   | Serialized params              |
+| **created_at**      | `TIMESTAMP`                                              | Record created                 |
+| **updated_at**      | `TIMESTAMP`                                              | Record updated                 |
+
+**Relationships**
+
+* `@ManyToOne` → `AstraJobWorkflows`
+* `@ManyToOne` → `AstraRunScheduleList`
+* `@OneToMany(mappedBy="triggeredJob")` → `AstraTriggeredJobsLogs`
+
+---
+
+### 5️⃣ **AstraTriggeredJobsLogs**
+
+Captures **detailed runtime logs**, messages, errors, and metrics for each triggered job.
+
+| Column                    | Type                                                | Description                                      |
+| ------------------------- | --------------------------------------------------- | ------------------------------------------------ |
+| **trigger_log_id**        | `BIGINT (PK)`                                       | Unique log record ID                             |
+| **trigger_job_id**        | `BIGINT (FK → astra_triggered_jobs.trigger_job_id)` | Linked job                                       |
+| **workflow_id**           | `BIGINT (FK → astra_job_workflows.workflow_id)`     | Linked workflow                                  |
+| **run_start_time**        | `TIMESTAMP`                                         | Execution start time                             |
+| **run_end_time**          | `TIMESTAMP`                                         | Execution end time                               |
+| **execution_duration_ms** | `BIGINT`                                            | Duration in ms                                   |
+| **log_level**             | `VARCHAR(50)`                                       | INFO, WARN, ERROR, DEBUG                         |
+| **log_message**           | `TEXT`                                              | Human-readable log entry                         |
+| **error_stacktrace**      | `TEXT`                                              | Stack trace if failed                            |
+| **exit_code**             | `INT`                                               | Execution exit code                              |
+| **status**                | `VARCHAR(50)`                                       | SUCCESS, FAILED, RUNNING                         |
+| **retry_count**           | `INT DEFAULT 0`                                     | Number of retries                                |
+| **node_name**             | `VARCHAR(255)`                                      | Server/Pod/Node name                             |
+| **trigger_source**        | `VARCHAR(50)`                                       | SCHEDULED, MANUAL, RETRY                         |
+| **additional_context**    | `TEXT` (or `JSON`)                                  | Contextual metadata (inputs, outputs, responses) |
+| **created_at**            | `TIMESTAMP DEFAULT CURRENT_TIMESTAMP`               | Record creation                                  |
+| **updated_at**            | `TIMESTAMP`                                         | Record updated                                   |
+
+**Relationships**
+
+* `@ManyToOne` → `AstraTriggeredJobs`
+* `@ManyToOne` → `AstraJobWorkflows`
+
+---
+
+## 🧰 **Repositories**
+
+Generate repositories for all entities:
+
+```java
+public interface AstraJobWorkflowsRepository extends JpaRepository<AstraJobWorkflows, Long> {}
+public interface AstraScheduledJobsConfigRepository extends JpaRepository<AstraScheduledJobsConfig, Long> {}
+public interface AstraRunScheduleListRepository extends JpaRepository<AstraRunScheduleList, Long> {}
+public interface AstraTriggeredJobsRepository extends JpaRepository<AstraTriggeredJobs, Long> {}
+public interface AstraTriggeredJobsLogsRepository extends JpaRepository<AstraTriggeredJobsLogs, Long> {}
+```
+
+---
+
+## ⚙️ **Scheduler and Services**
+
+### `AstraBatchExecScheduler`
+
+* Annotate with `@Service` and `@Scheduled(fixedDelay = 60000)`.
+* Responsibilities:
+
+  1. Check `astra_run_schedule_list` for jobs ready to run (`status=PENDING` and `scheduled_run_time <= now()`).
+  2. For each job:
+
+     * Create an entry in `astra_triggered_jobs`.
+     * Insert a `RUNNING` log record in `astra_triggered_jobs_logs`.
+     * Update `astra_run_schedule_list` with the new `trigger_job_id` and status `RUNNING`.
+  3. On success/failure:
+
+     * Update `astra_triggered_jobs` and log entries accordingly.
+  4. Handle retries where `retry_count < MAX_RETRIES`.
+
+### `JobTriggerService`
+
+Encapsulates the logic to execute workflows.
+Handles business logic for triggering, logging, and marking completion.
+
+### `RunQueueService`
+
+Responsible for scanning and updating the run queue (`astra_run_schedule_list`).
+
+### `NotificationService`
+
+Optional — handles notifications (email, Slack, dashboards).
+
+### `JobConstants`
+
+Defines job statuses:
+
+```java
+public class JobConstants {
+    public static final String STATUS_PENDING = "PENDING";
+    public static final String STATUS_RUNNING = "RUNNING";
+    public static final String STATUS_SUCCESS = "SUCCESS";
+    public static final String STATUS_FAILED = "FAILED";
+    public static final String STATUS_RETRY = "RETRY";
+}
+```
+
+---
+
+## 🧭 **Copilot Agent Prompt to Paste**
+
+> You are an expert Spring Boot engineer.
+> My project implements a Job Scheduling and Execution framework called **Astra Scheduler**.
+> It consists of the following database tables and entities:
+> `astra_job_workflows`, `astra_scheduled_jobs_config`, `astra_run_schedule_list`, `astra_triggered_jobs`, and `astra_triggered_jobs_logs`.
+>
+> Generate or validate the following:
+>
+> * JPA entities for each table with **all fields** and proper annotations.
+> * Relationships (`@ManyToOne`, `@OneToMany`, `@OneToOne`) between all entities.
+> * Repositories for CRUD and query operations.
+> * A `AstraBatchExecScheduler` class that runs every 60 seconds, reads pending jobs, triggers execution, creates job + log records, updates statuses, and handles retries.
+> * A `JobTriggerService` for encapsulated execution logic.
+> * A `JobConstants` class for statuses.
+> * Ensure all timestamp fields use `LocalDateTime`, and all DB writes are transactional.
+> * Log lifecycle events in `astra_triggered_jobs_logs`.
+> * The flow should handle both scheduled and manual triggers that merge through the `astra_run_schedule_list`.
+>
+> Make sure the final system correctly models this data flow:
+>
+> 1. Workflow and schedule definitions
+> 2. Run Schedule generation
+> 3. Scheduler picking jobs
+> 4. Triggered Jobs execution
+> 5. Logging into astra_triggered_jobs_logs
+>
+> Generate the code files in clean, production-ready style following modern Spring Boot 3 conventions.
+
+---
+
+Would you like me to include a **diagram prompt** section that you can feed into Copilot to auto-draw the full ERD + flow visualization (for README or architecture.md)? It can generate Mermaid or PlantUML from this schema automatically.
