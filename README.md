@@ -1,20 +1,53 @@
-@Service
+package com.your.package.here; // <-- keep your existing package
+
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import com.google.gson.JsonSyntaxException;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+
+// import your own classes
+// import com.bofa.ecomm.mda.sep.mobilecto.config.HelperFunctions;
+// import com.bofa.ecomm.mda.sep.mobilecto.config.AtomGlobalConfig;
+// import com.bofa.ecomm.mda.sep.mobilecto.config.AtomGlobalConfigRepository;
+
 public class AtomGlobalConfigService {
 
     private static final Logger LOGGER =
             Logger.getLogger(AtomGlobalConfigService.class.getName());
 
-    private final Environment environment;
+    // your existing fields / constructor / repository, etc.
+    // private final AtomGlobalConfigRepository globalConfigRepository;
 
-    @Autowired
-    public AtomGlobalConfigService(Environment environment) {
-        this.environment = environment;
+    /**
+     * Old signature retained for backwards compatibility.
+     * Calls the main method with no explicit profile (no JSON export).
+     */
+    public Map<String, Object> setGlobalConfigs() {
+        return setGlobalConfigs(null);
     }
 
-    public Map<String, Object> setGlobalConfigs() {
+    /**
+     * New environment-aware version.
+     *
+     * @param activeProfile the current environment/profile name, e.g.
+     *                      "dev_local", "dev_mini", "prod_mini",
+     *                      "prod_ext", "prod_local", "uat_local", etc.
+     */
+    public Map<String, Object> setGlobalConfigs(String activeProfile) {
         Map<String, Object> globalConfig = null;
 
-        // 1. Try DB first
+        // 1. Try to load from DB
         try {
             List<AtomGlobalConfig> atomGlobalConfigList = this.getGlobalConfigs();
 
@@ -27,8 +60,8 @@ public class AtomGlobalConfigService {
                 LOGGER.info("Loaded " + atomGlobalConfigList.size()
                         + " global configs from DB");
 
-                // ✅ For certain environments, write a JSON snapshot
-                Path exportPath = resolveExportPathForCurrentEnv();
+                // Decide if we should export JSON based on the profile
+                Path exportPath = resolveExportPathForProfile(activeProfile);
                 if (exportPath != null) {
                     exportConfigToJson(globalConfig, exportPath);
                 }
@@ -48,47 +81,59 @@ public class AtomGlobalConfigService {
     }
 
     /**
-     * Decide where (if at all) to export a JSON snapshot based on environment.
+     * Decide where (if at all) to export a JSON snapshot based on the profile.
+     *
+     * For dev_local, dev_mini, prod_mini:
+     *   -> ${user.home}/atom-configs/const_config.json
+     *
+     * For prod_ext, prod_local, UATs or anything else:
+     *   -> no export (returns null).
      */
-    private Path resolveExportPathForCurrentEnv() {
-        // Minis: write to user.home/atom-configs/const_config.json
-        if (environment.acceptsProfiles("dev_mini", "prod_mini")) {
-            String userHome = System.getProperty("user.home");
-            return Paths.get(userHome, "atom-configs", "const_config.json");
-        }
-
-        // dev_local: OK to write, same location as minis
-        if (environment.acceptsProfiles("dev_local")) {
-            String userHome = System.getProperty("user.home");
-            return Paths.get(userHome, "atom-configs", "const_config.json");
-        }
-
-        // prod_ext, prod_local, UATs, etc. → no export
-        if (environment.acceptsProfiles("prod_ext", "prod_local",
-                                        "uat_local", "uat_mini", "uat_ext")) {
+    private Path resolveExportPathForProfile(String activeProfile) {
+        if (activeProfile == null || activeProfile.isBlank()) {
             return null;
         }
 
-        // Default: be conservative – no export
+        String profile = activeProfile.trim().toLowerCase();
+
+        // Minis + dev_local: write snapshot under user.home/atom-configs
+        if (profile.equals("dev_local")
+                || profile.equals("dev_mini")
+                || profile.equals("prod_mini")) {
+
+            String userHome = System.getProperty("user.home");
+            return Paths.get(userHome, "atom-configs", "const_config.json");
+        }
+
+        // prod_ext, prod_local, UAT variants, etc. -> no export
+        if (profile.equals("prod_ext")
+                || profile.equals("prod_local")
+                || profile.startsWith("uat_")) {
+            return null;
+        }
+
+        // Default: be conservative and do not export
         return null;
     }
 
     /**
-     * Write config JSON to disk (used only in dev_local / *_mini).
+     * Write config JSON to disk (used only in dev_local / dev_mini / prod_mini).
+     * Errors here are logged but do NOT break the main flow.
      */
     private void exportConfigToJson(Map<String, Object> globalConfig, Path exportPath) {
         try {
             Files.createDirectories(exportPath.getParent());
 
-            String json = new GsonBuilder()
+            Gson gson = new GsonBuilder()
                     .setPrettyPrinting()
-                    .create()
-                    .toJson(globalConfig);
+                    .create();
 
-            // If you want to keep using your HelperFunctions:
+            String json = gson.toJson(globalConfig);
+
             if (!Files.exists(exportPath)) {
                 Files.createFile(exportPath);
             }
+
             int result = HelperFunctions.writeToFile(exportPath.toString(), json);
 
             if (result == 1) {
@@ -98,7 +143,7 @@ public class AtomGlobalConfigService {
             }
 
         } catch (Exception e) {
-            // IMPORTANT: log it but DO NOT fail the request because of export
+            // Log but do not fail the request because of export
             LOGGER.log(Level.WARNING,
                     "Failed to export global config JSON to " + exportPath, e);
         }
@@ -106,6 +151,7 @@ public class AtomGlobalConfigService {
 
     /**
      * PROD-safe fallback: read const_config.json from classpath.
+     * Requires file at src/main/resources/const_config.json.
      */
     private Map<String, Object> loadConfigFromClasspathJson() {
         String json = HelperFunctions.readFileFromResources("/const_config.json");
@@ -125,4 +171,6 @@ public class AtomGlobalConfigService {
             throw new IllegalStateException("Invalid JSON in const_config.json", e);
         }
     }
+
+    // your existing getGlobalConfigs() and other methods stay as they are
 }
